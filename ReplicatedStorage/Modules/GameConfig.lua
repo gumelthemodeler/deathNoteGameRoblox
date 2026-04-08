@@ -14,6 +14,12 @@ local GameConfig = {
 	TotalTasksRequired = 20,     -- Tasks Task Force must do to win
 	VotingTimeSeconds = 30,      -- How long players have to vote
 
+	-- Sabotage Cooldowns (in seconds)
+	SabotageCooldowns = {
+		Blackout = 45,
+		FakeHeartAttack = 60
+	},
+
 	-- Economy Payouts
 	Rewards = {
 		WinAsKiraCoins = 150,
@@ -21,6 +27,8 @@ local GameConfig = {
 		TaskCompleteCoins = 5,
 		CorrectVoteCoins = 25
 	}
+	
+	
 }
 
 return GameConfig
