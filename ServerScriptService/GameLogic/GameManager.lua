@@ -45,6 +45,8 @@ _G.EndGame = function(winningTeam)
 	end
 end
 
+local SyncRoleEvent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("SyncRoleEvent")
+
 local function StartRound()
 	SessionData.Reset()
 	SessionData.RoundState = "Playing"
@@ -63,13 +65,27 @@ local function StartRound()
 		local nameIndex = math.random(1, #availableNames)
 		local assignedName = table.remove(availableNames, nameIndex)
 
+		local isKira = (player == kiraPlayer)
+		local role = isKira and "Kira" or "TaskForce"
+
 		SessionData.ActivePlayers[player.UserId] = {
-			Role = (player == kiraPlayer) and "Kira" or "TaskForce",
+			Role = role,
 			RealName = assignedName,
 			IsAlive = true,
 			CollectedIDs = {}
 		}
-		print(player.Name .. " | Role: " .. SessionData.ActivePlayers[player.UserId].Role .. " | Name: " .. assignedName)
+
+		-- Fetch what Shinigami they have equipped from their save data
+		local persistentData = _G.PlayerProfiles[player.UserId]
+		local equippedShinigami = "Ryuk" -- Default fallback
+		if persistentData and persistentData.Equipped and persistentData.Equipped.Shinigami then
+			equippedShinigami = persistentData.Equipped.Shinigami
+		end
+
+		-- Secretly tell the client their role and their equipped Shinigami
+		SyncRoleEvent:FireClient(player, role, assignedName, equippedShinigami)
+
+		print(player.Name .. " | Role: " .. role .. " | Name: " .. assignedName)
 	end
 
 	-- Spawn ID Cards
