@@ -27,11 +27,12 @@ local Catalog = {
 	}
 }
 
--- Update client UI with their current coins/inventory
+-- Update client UI with their current coins/inventory/stats
 local function SyncClientData(player)
 	local profile = _G.PlayerProfiles[player.UserId]
 	if profile then
-		SyncDataEvent:FireClient(player, profile.Coins, profile.Gems, profile.Inventory, profile.Equipped)
+		-- Sends the coins, gems, inventory, equipped, level, AND stats to the client
+		SyncDataEvent:FireClient(player, profile.Coins, profile.Gems, profile.Inventory, profile.Equipped, profile.Level, profile.Stats)
 	end
 end
 
