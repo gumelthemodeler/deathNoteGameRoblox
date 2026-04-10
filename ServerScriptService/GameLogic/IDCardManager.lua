@@ -14,30 +14,38 @@ local function DistributeIDCards()
 		local spawnIndex = math.random(1, #availableSpawns)
 		local chosenSpawn = table.remove(availableSpawns, spawnIndex)
 
+		-- Create the physical ID
 		local idCard = Instance.new("Part")
 		idCard.Size = Vector3.new(1, 0.2, 1.5)
-		idCard.Color = Color3.fromRGB(200, 200, 200)
+		idCard.Color = Color3.fromRGB(200, 150, 100) -- Manilla Folder Color
 		idCard.CFrame = chosenSpawn.CFrame
 		idCard.Name = "IDCard_" .. data.RealName
 		idCard.Parent = workspace
 
+		-- The 3-Second Vulnerable Pickup Prompt
 		local prompt = Instance.new("ProximityPrompt")
-		prompt.ActionText = "Collect ID"
-		prompt.ObjectText = "Unknown ID Card"
-		prompt.HoldDuration = 1.5
+		prompt.ActionText = "Inspect Evidence"
+		prompt.ObjectText = "Dropped ID"
+		prompt.HoldDuration = 3 -- 🔥 Kira must stand still for 3 seconds!
+		prompt.KeyboardKeyCode = Enum.KeyCode.E
 		prompt.Parent = idCard
 
 		prompt.Triggered:Connect(function(player)
-			local playerData = SessionData.ActivePlayers[player.UserId]
-			if not playerData then return end
+			local pData = SessionData.ActivePlayers[player.UserId]
+			if not pData or not pData.IsAlive then return end
 
-			if playerData.Role == "Kira" then
-				table.insert(playerData.CollectedIDs, data.RealName)
-				print("Kira collected the ID for: " .. data.RealName)
+			if pData.Role == "Kira" then
+				-- KIRA STEALS THE ID
+				table.insert(pData.CollectedIDs, data.RealName)
+				print("[SERVER] Kira successfully stole the ID for: " .. data.RealName)
+
+				-- Destroy it so Kira knows they got it (and Civilians notice it's missing)
+				idCard:Destroy()
 			else
-				print(player.Name .. " (Task Force) hid an ID card.")
+				-- CIVILIAN TRIES TO GRAB IT (DENIED)
+				-- Civilians cannot move the IDs. They just have to leave them there.
+				print("[SERVER] " .. player.Name .. " (Civilian) tried to grab an ID. Denied.")
 			end
-			idCard:Destroy()
 		end)
 	end
 end
