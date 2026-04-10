@@ -20,16 +20,6 @@ PlayDeathEffectEvent.OnClientEvent:Connect(function(victimPlayer, effectName)
 			-- You could load a clutching chest animation here!
 		end
 
-		-- Play a loud heartbeat sound at the victim's location
-		local heartSound = Instance.new("Sound")
-		heartSound.SoundId = "rbxassetid://8625510618" -- Spooky heartbeat
-		heartSound.Volume = 2
-		heartSound.RollOffMaxDistance = 50
-		heartSound.Parent = rootPart
-		heartSound:Play()
-
-		Debris:AddItem(heartSound, 3)
-
 	elseif effectName == "ShadowHands" then
 		-- Premium Effect: Black hands drag them down
 		if humanoid then humanoid.WalkSpeed = 0 end
