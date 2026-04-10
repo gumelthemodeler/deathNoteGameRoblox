@@ -7,38 +7,28 @@ local SessionData = require(ServerScriptService.DataSystems.SessionData)
 local Events = ReplicatedStorage:WaitForChild("Events")
 local WriteNameEvent = Events:WaitForChild("WriteNameEvent")
 
--- Create an event to broadcast the cinematic death to all players
-local PlayDeathEffectEvent = Instance.new("RemoteEvent")
-PlayDeathEffectEvent.Name = "PlayDeathEffectEvent"
-PlayDeathEffectEvent.Parent = Events
-
-local function TriggerVotingPhase()
-	print("SUDDEN DEATH ALERT!")
-	SessionData.RoundState = "Voting"
-	task.wait(4) -- Wait a little longer so people can see the death cinematic
-
-	local meetingSpawn = workspace:FindFirstChild("MeetingSpawnLocation")
-	if meetingSpawn then
-		for _, player in ipairs(Players:GetPlayers()) do
-			local pData = SessionData.ActivePlayers[player.UserId]
-			if pData and pData.IsAlive and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-				player.Character.HumanoidRootPart.CFrame = meetingSpawn.CFrame
-			end
-		end
-	end
-
-	if _G.StartVotingPhase then
-		_G.StartVotingPhase()
-	end
+local PlayDeathEffectEvent = Events:FindFirstChild("PlayDeathEffectEvent")
+if not PlayDeathEffectEvent then
+	PlayDeathEffectEvent = Instance.new("RemoteEvent")
+	PlayDeathEffectEvent.Name = "PlayDeathEffectEvent"
+	PlayDeathEffectEvent.Parent = Events
 end
 
 WriteNameEvent.OnServerEvent:Connect(function(player, targetRealName)
 	local playerData = SessionData.ActivePlayers[player.UserId]
 
+	-- Check if Kira has already killed this cycle!
+	if SessionData.HasKilledThisCycle then 
+		print("[SERVER] Kira cannot kill again until the next cycle.")
+		return 
+	end
+
 	if playerData and playerData.Role == "Kira" then
-		-- Fetch Kira's equipped Death Effect
-		local persistentProfile = _G.PlayerProfiles[player.UserId]
-		local equippedEffect = "HeartAttack" -- Default
+		-- Lock the notebook for this cycle
+		SessionData.HasKilledThisCycle = true
+
+		local persistentProfile = _G.PlayerProfiles and _G.PlayerProfiles[player.UserId]
+		local equippedEffect = "HeartAttack" 
 		if persistentProfile and persistentProfile.Equipped and persistentProfile.Equipped.DeathEffect then
 			equippedEffect = persistentProfile.Equipped.DeathEffect
 		end
@@ -53,25 +43,34 @@ WriteNameEvent.OnServerEvent:Connect(function(player, targetRealName)
 
 		if victimPlayer then
 			task.spawn(function()
-				print("40 second timer started for " .. victimPlayer.Name)
+				print("[SERVER] Kira wrote a name! 40 second timer started.")
 				task.wait(40)
 
 				local victimData = SessionData.ActivePlayers[victimPlayer.UserId]
 				if victimData and victimData.IsAlive and victimPlayer.Character then
 					victimData.IsAlive = false
 
-					-- Broadcast the cinematic to EVERYONE in the server
+					-- Broadcast the cinematic to EVERYONE
 					PlayDeathEffectEvent:FireAllClients(victimPlayer, equippedEffect)
+					task.wait(2) -- Wait for the cinematic to finish
 
-					-- Wait a moment for the cinematic to play out before actually removing the body
-					task.wait(1.5)
 					if victimPlayer.Character and victimPlayer.Character:FindFirstChild("Humanoid") then
 						victimPlayer.Character.Humanoid.Health = 0
 						task.wait(0.1)
 						victimPlayer.Character:Destroy() 
 					end
 
-					TriggerVotingPhase()
+					-- Check if Kira just won the game before calling the meeting
+					local winner = SessionData.CheckWinCondition()
+					if winner and _G.EndGame then
+						_G.EndGame(winner)
+						return
+					end
+
+					-- 🔥 AUTOMATICALLY START THE MEETING INTERSECTION
+					if _G.StartMeeting then
+						_G.StartMeeting("SYSTEM", "A Heart Attack has occurred...")
+					end
 				end
 			end)
 		end
