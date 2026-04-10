@@ -2,90 +2,142 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Players = game:GetService("Players")
-
 local SessionData = require(ServerScriptService.DataSystems.SessionData)
-local GameConfig = require(ReplicatedStorage.Modules.GameConfig)
 
-local SubmitVoteEvent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("SubmitVoteEvent")
-local StartMeetingEvent = Instance.new("RemoteEvent")
-StartMeetingEvent.Name = "StartMeetingEvent"
-StartMeetingEvent.Parent = ReplicatedStorage:WaitForChild("Events")
+local Events = ReplicatedStorage:WaitForChild("Events")
+local UpdateTimer = Events:WaitForChild("UpdateTimer")
 
-local currentVotes = {}
-local votingActive = false
-
--- This is called by DeathNoteExecution when the 40 seconds are up
-_G.StartVotingPhase = function()
-	currentVotes = {}
-	votingActive = true
-	SessionData.RoundState = "Voting"
-	print("Voting has opened! Players have " .. GameConfig.VotingTimeSeconds .. " seconds.")
-
-	-- Tell all clients to open their Voting UI
-	StartMeetingEvent:FireAllClients(SessionData.ActivePlayers)
-
-	task.wait(GameConfig.VotingTimeSeconds)
-
-	votingActive = false
-	print("Voting closed. Tallying results...")
-
-	local highestVotes = 0
-	local arrestedUserId = nil
-	local tie = false
-
-	-- Tally the votes
-	for targetId, voteCount in pairs(currentVotes) do
-		if targetId == 0 then continue end -- 0 is a skipped vote
-
-		if voteCount > highestVotes then
-			highestVotes = voteCount
-			arrestedUserId = targetId
-			tie = false
-		elseif voteCount == highestVotes then
-			tie = true
-		end
+local function GetOrCreateEvent(name)
+	local ev = Events:FindFirstChild(name)
+	if not ev then
+		ev = Instance.new("RemoteEvent")
+		ev.Name = name
+		ev.Parent = Events
 	end
+	return ev
+end
 
-	if tie or not arrestedUserId then
-		print("Vote tied or skipped. No one was arrested.")
-	else
-		local arrestedPlayer = Players:GetPlayerByUserId(arrestedUserId)
-		if arrestedPlayer then
-			print(arrestedPlayer.Name .. " was ARRESTED!")
+local ShowPlayerVoting = GetOrCreateEvent("ShowPlayerVoting")
+local SubmitPlayerVote = GetOrCreateEvent("SubmitPlayerVote")
 
-			local arrestedData = SessionData.ActivePlayers[arrestedUserId]
-			if arrestedData then
-				arrestedData.IsAlive = false -- Mark them as dead/removed
+local isMeetingActive = false
+local currentVotes = {}
+local alivePlayersDuringMeeting = 0
 
-				-- Remove their character from the map
-				if arrestedPlayer.Character then
-					arrestedPlayer.Character:Destroy()
-				end
+-- ==========================================
+-- THE MEETING LOOP
+-- ==========================================
+_G.StartMeeting = function(callerName, reason)
+	if isMeetingActive or SessionData.RoundState ~= "Playing" then return end
+	isMeetingActive = true
+	currentVotes = {}
+	alivePlayersDuringMeeting = 0
 
-				-- Check if we caught Kira!
-				if arrestedData.Role == "Kira" then
-					print("TASK FORCE WINS! Kira was caught.")
-					if _G.EndGame then _G.EndGame("TaskForce") end
-					return -- Stop the script here so it doesn't resume the round
+	print("🚨 INTERSECTION TRIGGERED: " .. reason .. " 🚨")
+
+	-- 1. Teleport all alive players to the Meeting Room
+	local meetingSpawns = workspace:FindFirstChild("MeetingSpawns")
+	local spawnPoints = meetingSpawns and meetingSpawns:GetChildren() or {}
+	local spawnIndex = 1
+
+	for userId, data in pairs(SessionData.ActivePlayers) do
+		if data.IsAlive then
+			alivePlayersDuringMeeting += 1
+			local plr = Players:GetPlayerByUserId(userId)
+			if plr and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+				plr.Character.HumanoidRootPart.Anchored = true -- Freeze them
+
+				if #spawnPoints > 0 then
+					plr.Character.HumanoidRootPart.CFrame = spawnPoints[spawnIndex].CFrame + Vector3.new(0, 3, 0)
+					spawnIndex = (spawnIndex % #spawnPoints) + 1
 				end
 			end
 		end
 	end
 
-	-- If the game didn't end, resume the round
-	print("Resuming round...")
-	SessionData.RoundState = "Playing"
+	-- 2. Broadcast to UI
+	UpdateTimer:FireAllClients("MEETING IN PROGRESS", "--:--")
+	ShowPlayerVoting:FireAllClients(true, reason, SessionData.ActivePlayers)
+
+	-- 3. Wait for Voting Phase (90 seconds to argue and vote)
+	task.spawn(function()
+		for i = 90, 0, -1 do
+			-- Check if everyone has voted early
+			local votesCast = 0
+			for _, _ in pairs(currentVotes) do votesCast += 1 end
+			if votesCast >= alivePlayersDuringMeeting then break end
+			task.wait(1)
+		end
+
+		_G.EndMeeting()
+	end)
 end
 
--- Listen for votes from clients
-SubmitVoteEvent.OnServerEvent:Connect(function(player, targetUserId)
-	if not votingActive then return end
+-- ==========================================
+-- TALLY VOTES & RESTART CYCLE
+-- ==========================================
+SubmitPlayerVote.OnServerEvent:Connect(function(player, votedTargetUserId)
+	local pData = SessionData.ActivePlayers[player.UserId]
+	if isMeetingActive and pData and pData.IsAlive then
+		currentVotes[player.UserId] = votedTargetUserId
+	end
+end)
 
-	-- Initialize vote count if it doesn't exist
-	if not currentVotes[targetUserId] then
-		currentVotes[targetUserId] = 0
+_G.EndMeeting = function()
+	isMeetingActive = false
+	ShowPlayerVoting:FireAllClients(false, "", {})
+
+	-- Tally the votes
+	local voteCounts = {}
+	local maxVotes = 0
+	local tied = false
+	local executedUserId = nil
+
+	for _, votedId in pairs(currentVotes) do
+		if votedId ~= "Skip" then
+			voteCounts[votedId] = (voteCounts[votedId] or 0) + 1
+			if voteCounts[votedId] > maxVotes then
+				maxVotes = voteCounts[votedId]
+				executedUserId = votedId
+				tied = false
+			elseif voteCounts[votedId] == maxVotes then
+				tied = true
+			end
+		end
 	end
 
-	currentVotes[targetUserId] += 1
-	print(player.Name .. " voted for UserId: " .. targetUserId)
-end)
+	-- Process Execution
+	if executedUserId and not tied then
+		local targetData = SessionData.ActivePlayers[executedUserId]
+		local targetPlayer = Players:GetPlayerByUserId(executedUserId)
+
+		if targetData and targetData.IsAlive then
+			print("[SERVER] " .. targetPlayer.Name .. " was voted out and arrested!")
+			targetData.IsAlive = false
+			if targetPlayer and targetPlayer.Character then
+				targetPlayer.Character:BreakJoints()
+			end
+
+			local winner = SessionData.CheckWinCondition()
+			if winner and _G.EndGame then
+				_G.EndGame(winner)
+				return
+			end
+		end
+	else
+		print("[SERVER] Voting ended in a tie or skip. No one was arrested.")
+	end
+
+	-- UNFREEZE EVERYONE & RESTART THE CYCLE
+	for userId, data in pairs(SessionData.ActivePlayers) do
+		local plr = Players:GetPlayerByUserId(userId)
+		if plr and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+			plr.Character.HumanoidRootPart.Anchored = false
+			-- Optional: Teleport them back to their original spawn points here
+		end
+	end
+
+	-- 🔥 UNLOCK KIRA SO THEY CAN KILL AGAIN
+	SessionData.HasKilledThisCycle = false
+	print("[SERVER] Cycle Reset. Kira can now strike again.")
+end
